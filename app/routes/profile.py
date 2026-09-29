@@ -1,10 +1,11 @@
 import logging.config
 
 from flask import Blueprint, request, redirect, flash, url_for, jsonify, g
-from flask_login import current_user
+from flask_login import current_user, login_user
 from flask import render_template
 import json
 from datetime import datetime
+from uuid import uuid4
 import bcrypt
 
 from sqlalchemy import desc
@@ -337,10 +338,17 @@ def change_password_post():
     hashed = bcrypt.hashpw(new1.encode("utf-8"), bcrypt.gensalt())
     current_user.password = hashed.decode("utf-8")
 
+    # Rotate the session token so every other session for this account (e.g. one held by
+    # whoever prompted the password change) is invalidated. The current session is re-issued
+    # below so the user isn't logged out of the browser they changed it from.
+    current_user.session_token = str(uuid4())
+
     try:
         logger.debug("attempting to save updated password hash to DB")
         db.session.commit()
         logger.info("successfully saved updated password hash to DB")
+        login_user(current_user)  # bind this session to the new token
+        logger.info("rotated session token - other sessions for this user are now invalid")
         flash("Password change successful!")
         return redirect(url_for("profile_.profile"))
 

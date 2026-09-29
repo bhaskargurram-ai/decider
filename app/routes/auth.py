@@ -31,6 +31,15 @@ admin_permission = Permission(RoleNeed("admin"))
 edit_permission = Permission(RoleNeed("admin"), RoleNeed("editor"))
 member_permission = Permission(RoleNeed("admin"), RoleNeed("editor"), RoleNeed("member"))
 
+# Generic failure message shown for both "no such account" and "wrong password" so the
+# login form does not confirm which email addresses have accounts (account enumeration).
+LOGIN_FAILED_MESSAGE = "Invalid email or password."
+
+# bcrypt hash of a random secret, compared against when the email is unknown. This keeps
+# the failed-login response time the same whether or not the account exists, so timing
+# cannot be used to enumerate accounts either.
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(uuid4().bytes, bcrypt.gensalt())
+
 
 def public_route(func):
     """Decorator to mark a route as accessible by non-logged-in users"""
@@ -91,13 +100,16 @@ def login_post():
     # no user with this email
     user = User.query.filter_by(email=email).first()
     if not user:
-        flash("No user exists for this email.")
+        # Perform a bcrypt comparison anyway so this path takes as long as a real
+        # password check; the specific reason is only recorded server-side.
+        bcrypt.checkpw(password.encode("utf-8"), _DUMMY_PASSWORD_HASH)
+        flash(LOGIN_FAILED_MESSAGE)
         logger.info(f"login attempt used an email ({email}) not corresponding to any user")
         return redirect(url_for("auth_.login"))
 
     # wrong pass used
     if not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
-        flash("Incorrect password.")
+        flash(LOGIN_FAILED_MESSAGE)
         logger.info(f"login failed ({email}) - due to incorrect password")
         return redirect(url_for("auth_.login"))
 

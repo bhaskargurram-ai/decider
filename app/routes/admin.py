@@ -6,7 +6,8 @@ from sqlalchemy import asc, func
 
 from app.routes.auth import admin_permission, disabled_in_kiosk
 
-from flask_login import current_user
+from flask_login import current_user, login_user
+from uuid import uuid4
 import bcrypt
 
 from app.routes.utils import DictValidator, email_validator, password_validator
@@ -168,6 +169,10 @@ def admin_user_patch():
     if password:
         hashed_pass = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
         user.password = hashed_pass.decode("utf-8")
+        # A password reset must end any existing sessions for the account (an admin commonly
+        # resets a password because the account is suspected compromised). Sessions are keyed
+        # by session_token, so rotating it logs the user out everywhere.
+        user.session_token = str(uuid4())
 
     logger.debug(f"attempting to update {user.email}'s details: {role_change}{pass_change}")
     try:
@@ -177,6 +182,12 @@ def admin_user_patch():
         db.session.rollback()
         logger.exception(f"failed to update {user.email}'s details: {role_change}{pass_change}")
         return jsonify(message="Unable to save user."), 400
+
+    if password:
+        if user.id == current_user.id:
+            # admin changed their own password: keep this session, drop all others
+            login_user(user)
+        logger.info(f"rotated session token for {user.email} - their existing sessions are now invalid")
     logger.info(f"successfully updated {user.email}'s details: {role_change}{pass_change}")
     return jsonify(email=user.email), 200
 
